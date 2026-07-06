@@ -2,36 +2,36 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>5G NR Ray Tracing — Piccadilly Circus, London</title>
+<title>5G NR 3D Ray Tracing — Piccadilly Circus, London</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
 #ui { position: absolute; top: 0; left: 0; width: 300px; height: 100vh; background: #16213e; padding: 16px; overflow-y: auto; z-index: 10; border-right: 1px solid #0f3460; }
-#ui h1 { font-size: 16px; margin-bottom: 8px; color: #e94560; }
+#ui h1 { font-size: 16px; margin-bottom: 4px; color: #e94560; }
+#ui .subtitle { font-size: 11px; color: #aaa; margin-bottom: 10px; }
 #ui h2 { font-size: 13px; margin: 12px 0 6px; color: #0f9; }
 #ui label { display: block; font-size: 12px; margin: 4px 0 2px; color: #aaa; }
 #ui input[type=range], #ui input[type=number] { width: 100%; }
 #ui .param-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 #ui .param-row label { flex: 1; }
 #ui .param-row input { width: 80px; }
-#ui .bs-list { margin: 8px 0; }
-#ui .bs-item { background: #0f3460; border-radius: 4px; padding: 6px 8px; margin: 4px 0; font-size: 11px; cursor: pointer; }
-#ui .bs-item:hover { background: #1a4a7a; }
-#ui .bs-item.selected { border: 1px solid #e94560; }
+#ui .bs-list { margin: 8px 0; max-height: 140px; overflow-y: auto; }
+#ui .bs-item { background: #0f3460; border-radius: 4px; padding: 5px 8px; margin: 3px 0; font-size: 11px; }
 #ui button { background: #e94560; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; margin: 4px 2px; }
 #ui button:hover { background: #ff6b6b; }
 #ui .info { font-size: 11px; color: #888; margin-top: 12px; line-height: 1.5; }
 #canvas-container { position: absolute; top: 0; left: 300px; right: 0; bottom: 0; }
-canvas { display: block; width: 100%; height: 100%; }
-#legend { position: absolute; bottom: 16px; right: 16px; background: rgba(22,33,62,0.9); padding: 10px; border-radius: 6px; font-size: 11px; }
-#legend .bar { width: 200px; height: 14px; border-radius: 3px; margin: 4px 0; }
+#legend { position: absolute; bottom: 16px; right: 16px; background: rgba(22,33,62,0.92); padding: 10px; border-radius: 6px; font-size: 11px; z-index: 5; }
+#legend .bar { width: 200px; height: 14px; border-radius: 3px; margin: 4px 0; background: linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); }
 #legend .labels { display: flex; justify-content: space-between; font-size: 10px; color: #aaa; }
+#viewBtns { margin-top: 8px; }
+#viewBtns button { font-size: 11px; padding: 4px 8px; }
 </style>
 </head>
 <body>
 <div id="ui">
-    <h1>5G NR Ray Tracing Model</h1>
-    <p style="font-size:11px;color:#aaa;margin-bottom:8px;">Piccadilly Circus, London — 8.4 GHz</p>
+    <h1>5G NR 3D Ray Tracing</h1>
+    <p class="subtitle">Piccadilly Circus, London — 8.4 GHz</p>
 
     <h2>Simulation Parameters</h2>
     <div class="param-row">
@@ -55,8 +55,8 @@ canvas { display: block; width: 100%; height: 100%; }
         <input type="number" id="refLoss" value="6" step="0.5" min="1" max="15">
     </div>
     <div class="param-row">
-        <label>Grid Resolution:</label>
-        <input type="range" id="gridRes" value="8" min="4" max="20">
+        <label>Heatmap Resolution:</label>
+        <input type="range" id="gridRes" value="10" min="5" max="25">
     </div>
     <label style="margin-top:6px;">
         <input type="checkbox" id="showRays" checked> Show Rays
@@ -68,6 +68,12 @@ canvas { display: block; width: 100%; height: 100%; }
         <input type="checkbox" id="showHeatmap" checked> Show Coverage Heatmap
     </label>
 
+    <div id="viewBtns">
+        <button id="viewTop">Top View</button>
+        <button id="viewAngle">Angle View</button>
+        <button id="viewStreet">Street View</button>
+    </div>
+
     <h2>Base Stations (drag to move)</h2>
     <div class="bs-list" id="bsList"></div>
     <button id="btnReset">Reset Positions</button>
@@ -78,102 +84,133 @@ canvas { display: block; width: 100%; height: 100%; }
     <div id="stats" style="font-size:11px;color:#ccc;"></div>
 
     <div class="info">
-        <strong>Instructions:</strong><br>
-        • Drag red triangles to reposition base stations<br>
-        • Blue dots are mobile users (outdoor)<br>
-        • Heatmap shows received signal strength<br>
-        • Rays show dominant propagation paths<br>
-        • ISD: 450m | Freq: 8.4 GHz (FR2-like)
+        <strong>Controls:</strong><br>
+        • Left-click + drag: Rotate view<br>
+        • Right-click + drag: Pan<br>
+        • Scroll: Zoom<br>
+        • Click BS antenna to drag on ground plane<br>
+        • ISD: 450m | Freq: 8.4 GHz
     </div>
 </div>
 
-<div id="canvas-container">
-    <canvas id="canvas"></canvas>
-</div>
+<div id="canvas-container"></div>
 
 <div id="legend">
     <div>Signal Strength (dBm)</div>
-    <div class="bar" id="legendBar"></div>
+    <div class="bar"></div>
     <div class="labels"><span>-120</span><span>-90</span><span>-60</span><span>-30</span></div>
 </div>
 
-<script>
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const container = document.getElementById('canvas-container');
-
-const SCALE = 2.5; // pixels per meter
-const MAP_W = 900; // meters width of map area
-const MAP_H = 700; // meters height of map area
-
-let W, H;
-function resize() {
-    W = container.clientWidth;
-    H = container.clientHeight;
-    canvas.width = W;
-    canvas.height = H;
-    recalculate();
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
 }
-window.addEventListener('resize', resize);
+</script>
 
-// Piccadilly Circus approximate building footprints (simplified polygons in meters from top-left)
-// Origin (0,0) is top-left of the map area; Piccadilly Circus center ~ (450, 350)
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const container = document.getElementById('canvas-container');
+const MAP_W = 900;
+const MAP_H = 700;
+const CX = MAP_W / 2;
+const CZ = MAP_H / 2;
+
+// Scene setup
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a2e);
+scene.fog = new THREE.Fog(0x1a1a2e, 800, 1600);
+
+const camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 1, 3000);
+camera.position.set(450, 500, 750);
+camera.lookAt(CX, 0, CZ);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(container.clientWidth, container.clientHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(CX, 0, CZ);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+controls.update();
+
+// Lighting
+const ambient = new THREE.AmbientLight(0x404060, 0.6);
+scene.add(ambient);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+dirLight.position.set(300, 400, 200);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.left = -600;
+dirLight.shadow.camera.right = 600;
+dirLight.shadow.camera.top = 600;
+dirLight.shadow.camera.bottom = -600;
+scene.add(dirLight);
+
+const hemiLight = new THREE.HemisphereLight(0x8888cc, 0x444422, 0.4);
+scene.add(hemiLight);
+
+// === DATA ===
 const buildings = [
-    // Block NW of circus
     { pts: [[280,120],[380,120],[380,220],[340,240],[280,240]], h: 28 },
-    // Criterion Theatre / south side
     { pts: [[340,380],[500,380],[500,440],[340,440]], h: 22 },
-    // Trocadero block
     { pts: [[180,280],[280,280],[280,380],[180,380]], h: 35 },
-    // Shaftesbury Avenue north
     { pts: [[400,100],[540,100],[540,180],[400,180]], h: 30 },
-    // Regent Street west block
     { pts: [[120,140],[200,140],[200,320],[120,320]], h: 32 },
-    // Coventry Street block
     { pts: [[500,200],[640,200],[640,300],[500,300]], h: 26 },
-    // Haymarket block
     { pts: [[380,460],[520,460],[520,560],[380,560]], h: 24 },
-    // Lower Regent St block
     { pts: [[540,340],[680,340],[680,460],[540,460]], h: 30 },
-    // Jermyn Street block
     { pts: [[200,460],[360,460],[360,580],[200,580]], h: 20 },
-    // Glasshouse St block
     { pts: [[100,380],[180,380],[180,500],[100,500]], h: 25 },
-    // Air Street block
     { pts: [[280,260],[340,260],[340,360],[280,360]], h: 27 },
-    // Denman Street block
     { pts: [[180,580],[320,580],[320,650],[180,650]], h: 22 },
-    // Piccadilly south
     { pts: [[520,480],[700,480],[700,580],[520,580]], h: 28 },
-    // Warwick block
     { pts: [[680,100],[800,100],[800,240],[680,240]], h: 32 },
-    // NE block
     { pts: [[600,60],[760,60],[760,140],[600,140]], h: 26 },
-    // SW block
     { pts: [[60,500],[140,500],[140,620],[60,620]], h: 24 },
-    // East block
     { pts: [[720,300],[850,300],[850,420],[720,420]], h: 30 },
-    // Far south
     { pts: [[340,600],[500,600],[500,680],[340,680]], h: 22 },
 ];
 
-// Convert building polygons to edges for ray intersection
-function getBuildingEdges() {
-    const edges = [];
-    for (const b of buildings) {
-        const pts = b.pts;
-        for (let i = 0; i < pts.length; i++) {
-            const j = (i + 1) % pts.length;
-            edges.push({ x1: pts[i][0], y1: pts[i][1], x2: pts[j][0], y2: pts[j][1] });
-        }
-    }
-    return edges;
-}
-const allEdges = getBuildingEdges();
+// Streets: defined as polyline centerlines with width
+const streets = [
+    // Regent Street (north-south through west)
+    { path: [[210,50],[210,140],[210,320],[225,380],[240,440],[250,500],[260,600],[270,700]], width: 18, name: 'Regent St' },
+    // Shaftesbury Avenue (diagonal NW to SE through circus)
+    { path: [[280,50],[350,120],[420,200],[450,280],[460,320],[470,350]], width: 16, name: 'Shaftesbury Ave' },
+    // Piccadilly (east-west south of circus)
+    { path: [[50,420],[100,415],[180,410],[280,400],[380,395],[450,390],[540,385],[640,380],[750,375],[900,370]], width: 18, name: 'Piccadilly' },
+    // Coventry Street (east from circus)
+    { path: [[460,320],[500,310],[560,300],[640,290],[700,285]], width: 14, name: 'Coventry St' },
+    // Haymarket (south from circus)
+    { path: [[440,350],[445,400],[450,460],[455,520],[460,580],[465,650],[470,700]], width: 16, name: 'Haymarket' },
+    // Lower Regent Street (SW from circus)
+    { path: [[430,350],[400,400],[370,450],[340,500],[310,560],[280,620]], width: 14, name: 'Lower Regent St' },
+    // Glasshouse Street (west)
+    { path: [[50,350],[100,352],[150,355],[200,358],[280,360],[350,350],[430,345]], width: 12, name: 'Glasshouse St' },
+    // Denman Street
+    { path: [[280,440],[300,480],[320,520],[340,560],[360,600]], width: 10, name: 'Denman St' },
+    // Jermyn Street
+    { path: [[50,580],[140,575],[200,570],[300,565],[400,560],[520,555],[650,550],[800,545]], width: 12, name: 'Jermyn St' },
+    // Air Street
+    { path: [[350,200],[360,240],[370,280],[380,320],[390,360],[400,400]], width: 10, name: 'Air St' },
+    // Warwick Street
+    { path: [[150,320],[160,360],[170,400],[180,440],[190,480]], width: 9, name: 'Warwick St' },
+    // Great Windmill Street
+    { path: [[340,100],[345,150],[350,200],[355,250],[360,300]], width: 10, name: 'Great Windmill St' },
+];
 
-// Initial BS positions (rooftop-mounted, ISD ~450m hexagonal-ish layout around center 450,350)
 const ISD = 450;
-const CENTER = { x: 450, y: 350 };
 const defaultBS = [
     { x: 450, y: 350, label: 'BS1' },
     { x: 450 + ISD * 0.5, y: 350 - ISD * 0.433, label: 'BS2' },
@@ -186,8 +223,306 @@ const defaultBS = [
 
 let baseStations = defaultBS.map(b => ({ ...b }));
 let mobileUsers = [];
-let heatmap = null;
 let userResults = [];
+
+// === 3D BUILDING CONSTRUCTION ===
+const buildingGroup = new THREE.Group();
+scene.add(buildingGroup);
+
+const buildingMaterials = [
+    new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.7 }),
+    new THREE.MeshStandardMaterial({ color: 0x667788, roughness: 0.6 }),
+    new THREE.MeshStandardMaterial({ color: 0x4a5a6a, roughness: 0.8 }),
+    new THREE.MeshStandardMaterial({ color: 0x5a6a7a, roughness: 0.7 }),
+];
+
+const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x3a4a5a, roughness: 0.9 });
+const windowMaterial = new THREE.MeshStandardMaterial({ color: 0x88aacc, emissive: 0x223344, emissiveIntensity: 0.3, roughness: 0.2, metalness: 0.5 });
+
+function createBuildings() {
+    buildingGroup.clear();
+    buildings.forEach((b, idx) => {
+        const shape = new THREE.Shape();
+        shape.moveTo(b.pts[0][0], b.pts[0][1]);
+        for (let i = 1; i < b.pts.length; i++) {
+            shape.lineTo(b.pts[i][0], b.pts[i][1]);
+        }
+        shape.closePath();
+
+        const extrudeSettings = { depth: b.h, bevelEnabled: false };
+        const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        geo.rotateX(-Math.PI / 2);
+        geo.translate(0, b.h, 0);
+
+        const mat = buildingMaterials[idx % buildingMaterials.length].clone();
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        buildingGroup.add(mesh);
+
+        // Add window rows
+        const cx = b.pts.reduce((s, p) => s + p[0], 0) / b.pts.length;
+        const cz = b.pts.reduce((s, p) => s + p[1], 0) / b.pts.length;
+        const minX = Math.min(...b.pts.map(p => p[0]));
+        const maxX = Math.max(...b.pts.map(p => p[0]));
+        const minZ = Math.min(...b.pts.map(p => p[1]));
+        const maxZ = Math.max(...b.pts.map(p => p[1]));
+        const ww = maxX - minX;
+        const wz = maxZ - minZ;
+
+        for (let floor = 4; floor < b.h - 2; floor += 5) {
+            // Front and back windows
+            const nWin = Math.floor(ww / 8);
+            for (let w = 0; w < nWin; w++) {
+                const wx = minX + 4 + w * (ww - 8) / Math.max(1, nWin - 1);
+                const winGeo = new THREE.PlaneGeometry(3, 2.5);
+                const winF = new THREE.Mesh(winGeo, windowMaterial);
+                winF.position.set(wx, floor, minZ - 0.1);
+                buildingGroup.add(winF);
+                const winB = new THREE.Mesh(winGeo, windowMaterial);
+                winB.position.set(wx, floor, maxZ + 0.1);
+                winB.rotation.y = Math.PI;
+                buildingGroup.add(winB);
+            }
+            // Side windows
+            const nWinS = Math.floor(wz / 8);
+            for (let w = 0; w < nWinS; w++) {
+                const wz2 = minZ + 4 + w * (wz - 8) / Math.max(1, nWinS - 1);
+                const winGeo = new THREE.PlaneGeometry(3, 2.5);
+                const winL = new THREE.Mesh(winGeo, windowMaterial);
+                winL.position.set(minX - 0.1, floor, wz2);
+                winL.rotation.y = Math.PI / 2;
+                buildingGroup.add(winL);
+                const winR = new THREE.Mesh(winGeo, windowMaterial);
+                winR.position.set(maxX + 0.1, floor, wz2);
+                winR.rotation.y = -Math.PI / 2;
+                buildingGroup.add(winR);
+            }
+        }
+
+        // Roof
+        const roofShape = new THREE.Shape();
+        roofShape.moveTo(b.pts[0][0], b.pts[0][1]);
+        for (let i = 1; i < b.pts.length; i++) roofShape.lineTo(b.pts[i][0], b.pts[i][1]);
+        roofShape.closePath();
+        const roofGeo = new THREE.ShapeGeometry(roofShape);
+        roofGeo.rotateX(-Math.PI / 2);
+        roofGeo.translate(0, b.h + 0.1, 0);
+        const roofMesh = new THREE.Mesh(roofGeo, roofMaterial);
+        buildingGroup.add(roofMesh);
+    });
+}
+createBuildings();
+
+// === STREETS (Roads) ===
+const streetGroup = new THREE.Group();
+scene.add(streetGroup);
+
+const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.95 });
+const pavementMaterial = new THREE.MeshStandardMaterial({ color: 0x5a5a5a, roughness: 0.85 });
+const lineMarkingMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6 });
+
+function createStreets() {
+    streetGroup.clear();
+
+    streets.forEach(street => {
+        const path = street.path;
+        const hw = street.width / 2; // half road width
+        const pavW = 4; // pavement width on each side
+
+        for (let i = 0; i < path.length - 1; i++) {
+            const x1 = path[i][0], z1 = path[i][1];
+            const x2 = path[i + 1][0], z2 = path[i + 1][1];
+            const dx = x2 - x1, dz = z2 - z1;
+            const len = Math.sqrt(dx * dx + dz * dz);
+            const nx = -dz / len, nz = dx / len; // perpendicular
+
+            // Road surface
+            const roadShape = new THREE.Shape();
+            roadShape.moveTo(x1 + nx * hw, z1 + nz * hw);
+            roadShape.lineTo(x2 + nx * hw, z2 + nz * hw);
+            roadShape.lineTo(x2 - nx * hw, z2 - nz * hw);
+            roadShape.lineTo(x1 - nx * hw, z1 - nz * hw);
+            roadShape.closePath();
+
+            const roadGeo = new THREE.ShapeGeometry(roadShape);
+            roadGeo.rotateX(-Math.PI / 2);
+            roadGeo.translate(0, 0.05, 0);
+            const roadMesh = new THREE.Mesh(roadGeo, roadMaterial);
+            roadMesh.receiveShadow = true;
+            streetGroup.add(roadMesh);
+
+            // Pavement left
+            const pavLShape = new THREE.Shape();
+            pavLShape.moveTo(x1 + nx * (hw + pavW), z1 + nz * (hw + pavW));
+            pavLShape.lineTo(x2 + nx * (hw + pavW), z2 + nz * (hw + pavW));
+            pavLShape.lineTo(x2 + nx * hw, z2 + nz * hw);
+            pavLShape.lineTo(x1 + nx * hw, z1 + nz * hw);
+            pavLShape.closePath();
+
+            const pavLGeo = new THREE.ExtrudeGeometry(pavLShape, { depth: 0.15, bevelEnabled: false });
+            pavLGeo.rotateX(-Math.PI / 2);
+            pavLGeo.translate(0, 0.15, 0);
+            const pavLMesh = new THREE.Mesh(pavLGeo, pavementMaterial);
+            pavLMesh.receiveShadow = true;
+            streetGroup.add(pavLMesh);
+
+            // Pavement right
+            const pavRShape = new THREE.Shape();
+            pavRShape.moveTo(x1 - nx * hw, z1 - nz * hw);
+            pavRShape.lineTo(x2 - nx * hw, z2 - nz * hw);
+            pavRShape.lineTo(x2 - nx * (hw + pavW), z2 - nz * (hw + pavW));
+            pavRShape.lineTo(x1 - nx * (hw + pavW), z1 - nz * (hw + pavW));
+            pavRShape.closePath();
+
+            const pavRGeo = new THREE.ExtrudeGeometry(pavRShape, { depth: 0.15, bevelEnabled: false });
+            pavRGeo.rotateX(-Math.PI / 2);
+            pavRGeo.translate(0, 0.15, 0);
+            const pavRMesh = new THREE.Mesh(pavRGeo, pavementMaterial);
+            pavRMesh.receiveShadow = true;
+            streetGroup.add(pavRMesh);
+
+            // Center line markings (dashed)
+            const segments = Math.floor(len / 12);
+            for (let s = 0; s < segments; s++) {
+                const t1 = (s * 12 + 2) / len;
+                const t2 = (s * 12 + 8) / len;
+                if (t2 > 1) break;
+                const lx1 = x1 + dx * t1, lz1 = z1 + dz * t1;
+                const lx2 = x1 + dx * t2, lz2 = z1 + dz * t2;
+                const lineGeo = new THREE.PlaneGeometry(0.3, 6);
+                const lineMesh = new THREE.Mesh(lineGeo, lineMarkingMaterial);
+                lineMesh.rotation.x = -Math.PI / 2;
+                const mx = (lx1 + lx2) / 2, mz = (lz1 + lz2) / 2;
+                lineMesh.position.set(mx, 0.08, mz);
+                lineMesh.rotation.z = -Math.atan2(dz, dx);
+                streetGroup.add(lineMesh);
+            }
+        }
+    });
+}
+createStreets();
+
+// === GROUND PLANE ===
+const groundGeo = new THREE.PlaneGeometry(MAP_W + 200, MAP_H + 200);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a2a1a, roughness: 0.95 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(CX, -0.1, CZ);
+ground.receiveShadow = true;
+scene.add(ground);
+
+// === HEATMAP PLANE ===
+const heatmapCanvas = document.createElement('canvas');
+const heatmapCtx = heatmapCanvas.getContext('2d');
+heatmapCanvas.width = 180;
+heatmapCanvas.height = 140;
+const heatmapTexture = new THREE.CanvasTexture(heatmapCanvas);
+heatmapTexture.minFilter = THREE.LinearFilter;
+const heatmapMat = new THREE.MeshBasicMaterial({ map: heatmapTexture, transparent: true, opacity: 0.6, depthWrite: false });
+const heatmapPlane = new THREE.Mesh(new THREE.PlaneGeometry(MAP_W, MAP_H), heatmapMat);
+heatmapPlane.rotation.x = -Math.PI / 2;
+heatmapPlane.position.set(CX, 0.2, CZ);
+scene.add(heatmapPlane);
+
+// === BASE STATIONS ===
+const bsGroup = new THREE.Group();
+scene.add(bsGroup);
+const bsMeshes = [];
+
+function createBSMeshes() {
+    bsGroup.clear();
+    bsMeshes.length = 0;
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 });
+    const antennaMat = new THREE.MeshStandardMaterial({ color: 0xe94560, emissive: 0xe94560, emissiveIntensity: 0.5 });
+    const diskMat = new THREE.MeshStandardMaterial({ color: 0xff3355, emissive: 0xff3355, emissiveIntensity: 0.3 });
+
+    baseStations.forEach((bs, i) => {
+        const group = new THREE.Group();
+
+        // Find which building this BS is on, get height
+        let bsHeight = 35;
+        for (const b of buildings) {
+            if (pointInPolygon(bs.x, bs.y, b.pts)) { bsHeight = b.h; break; }
+        }
+        // If not on a building, find nearest and place above
+        if (bsHeight === 35) {
+            let minD = Infinity;
+            for (const b of buildings) {
+                const cx = b.pts.reduce((s, p) => s + p[0], 0) / b.pts.length;
+                const cz = b.pts.reduce((s, p) => s + p[1], 0) / b.pts.length;
+                const d = Math.sqrt((bs.x - cx) ** 2 + (bs.y - cz) ** 2);
+                if (d < minD) { minD = d; bsHeight = b.h; }
+            }
+        }
+        bs._height = bsHeight;
+
+        // Pole
+        const poleGeo = new THREE.CylinderGeometry(0.4, 0.6, 8, 8);
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.y = bsHeight + 4;
+        group.add(pole);
+
+        // Antenna panels (3 sectors)
+        for (let s = 0; s < 3; s++) {
+            const ang = (s / 3) * Math.PI * 2;
+            const panelGeo = new THREE.BoxGeometry(1.5, 4, 0.4);
+            const panel = new THREE.Mesh(panelGeo, antennaMat);
+            panel.position.set(Math.cos(ang) * 1.5, bsHeight + 7, Math.sin(ang) * 1.5);
+            panel.rotation.y = -ang;
+            group.add(panel);
+        }
+
+        // Signal indicator ring
+        const ringGeo = new THREE.TorusGeometry(3, 0.2, 8, 24);
+        const ring = new THREE.Mesh(ringGeo, diskMat);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = bsHeight + 9;
+        group.add(ring);
+
+        // Label sprite
+        const labelCanvas = document.createElement('canvas');
+        labelCanvas.width = 128;
+        labelCanvas.height = 64;
+        const lctx = labelCanvas.getContext('2d');
+        lctx.fillStyle = '#e94560';
+        lctx.font = 'bold 36px sans-serif';
+        lctx.textAlign = 'center';
+        lctx.fillText(bs.label, 64, 44);
+        const labelTex = new THREE.CanvasTexture(labelCanvas);
+        const labelMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true });
+        const labelSprite = new THREE.Sprite(labelMat);
+        labelSprite.scale.set(16, 8, 1);
+        labelSprite.position.y = bsHeight + 14;
+        group.add(labelSprite);
+
+        group.position.set(bs.x, 0, bs.y);
+        group.userData = { bsIndex: i };
+        bsGroup.add(group);
+        bsMeshes.push(group);
+    });
+}
+
+// === MOBILE USERS ===
+const userGroup = new THREE.Group();
+scene.add(userGroup);
+
+function pointInPolygon(px, py, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i][0], yi = pts[i][1];
+        const xj = pts[j][0], yj = pts[j][1];
+        if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+}
+
+function isInsideBuilding(px, py) {
+    for (const b of buildings) {
+        if (pointInPolygon(px, py, b.pts)) return true;
+    }
+    return false;
+}
 
 function generateUsers(n = 40) {
     mobileUsers = [];
@@ -202,26 +537,62 @@ function generateUsers(n = 40) {
     }
 }
 
-function isInsideBuilding(px, py) {
-    for (const b of buildings) {
-        if (pointInPolygon(px, py, b.pts)) return true;
-    }
-    return false;
+function createUserMeshes() {
+    userGroup.clear();
+    const userGeo = new THREE.CapsuleGeometry(1, 2.5, 4, 8);
+    mobileUsers.forEach((u, i) => {
+        const color = userResults[i] ? rssiToColor(userResults[i].rssi) : 0x4488ff;
+        const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.2 });
+        const mesh = new THREE.Mesh(userGeo, mat);
+        mesh.position.set(u.x, 2, u.y);
+        mesh.castShadow = true;
+        userGroup.add(mesh);
+    });
 }
 
-function pointInPolygon(px, py, pts) {
-    let inside = false;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-        const xi = pts[i][0], yi = pts[i][1];
-        const xj = pts[j][0], yj = pts[j][1];
-        if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
-            inside = !inside;
+// === RAY VISUALIZATION ===
+const rayGroup = new THREE.Group();
+scene.add(rayGroup);
+
+function createRayLines() {
+    rayGroup.clear();
+    if (!document.getElementById('showRays').checked) return;
+
+    userResults.forEach((r, i) => {
+        if (!r.trace || !r.trace.path) return;
+        const path = r.trace.path;
+        const color = r.trace.los ? 0x00ff88 : 0xffcc00;
+        const points = path.map(p => new THREE.Vector3(p[0], r.trace.los ? 15 : 10, p[1]));
+
+        // Elevate first point to BS height
+        const bsIdx = r.bsIdx;
+        if (bsIdx < baseStations.length) {
+            points[0].y = (baseStations[bsIdx]._height || 30) + 7;
+        }
+        // Last point at user height
+        points[points.length - 1].y = 2;
+
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const lineMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: r.trace.los ? 0.6 : 0.4 });
+        const line = new THREE.Line(lineGeo, lineMat);
+        rayGroup.add(line);
+    });
+}
+
+// === RAY TRACING ENGINE ===
+function getBuildingEdges() {
+    const edges = [];
+    for (const b of buildings) {
+        const pts = b.pts;
+        for (let i = 0; i < pts.length; i++) {
+            const j = (i + 1) % pts.length;
+            edges.push({ x1: pts[i][0], y1: pts[i][1], x2: pts[j][0], y2: pts[j][1] });
         }
     }
-    return inside;
+    return edges;
 }
+const allEdges = getBuildingEdges();
 
-// Ray-segment intersection
 function raySegIntersect(ox, oy, dx, dy, x1, y1, x2, y2) {
     const ex = x2 - x1, ey = y2 - y1;
     const denom = dx * ey - dy * ex;
@@ -229,158 +600,157 @@ function raySegIntersect(ox, oy, dx, dy, x1, y1, x2, y2) {
     const t = ((x1 - ox) * ey - (y1 - oy) * ex) / denom;
     const u = ((x1 - ox) * dy - (y1 - oy) * dx) / denom;
     if (t > 0.001 && u >= 0 && u <= 1) {
-        return { t, x: ox + dx * t, y: oy + dy * t, nx: -ey, ny: ex, u };
+        return { t, x: ox + dx * t, y: oy + dy * t, nx: -ey, ny: ex };
     }
     return null;
 }
 
-// Find nearest intersection along a ray
 function castRay(ox, oy, dx, dy) {
-    let nearest = null;
-    let minT = Infinity;
+    let nearest = null, minT = Infinity;
     for (const e of allEdges) {
         const hit = raySegIntersect(ox, oy, dx, dy, e.x1, e.y1, e.x2, e.y2);
-        if (hit && hit.t < minT) {
-            minT = hit.t;
-            nearest = hit;
-        }
+        if (hit && hit.t < minT) { minT = hit.t; nearest = hit; }
     }
     return nearest;
 }
 
-// Trace ray with reflections, return total path length and number of reflections
 function traceRay(sx, sy, tx, ty, maxReflections) {
     let dx = tx - sx, dy = ty - sy;
     const directDist = Math.sqrt(dx * dx + dy * dy);
-    const len = directDist;
-    dx /= len; dy /= len;
+    dx /= directDist; dy /= directDist;
 
-    // Check LOS first
     const losHit = castRay(sx, sy, dx, dy);
     if (!losHit || losHit.t >= directDist - 0.5) {
         return { los: true, dist: directDist, reflections: 0, path: [[sx, sy], [tx, ty]] };
     }
 
-    // Try reflected paths (simplified: shoot rays in spread directions)
     let bestResult = null;
     const angles = 36;
     for (let a = 0; a < angles; a++) {
         const ang = (a / angles) * 2 * Math.PI;
         let rdx = Math.cos(ang), rdy = Math.sin(ang);
-        let cx = sx, cy = sy;
-        let totalDist = 0;
-        let refs = 0;
+        let cx = sx, cy = sy, totalDist = 0, refs = 0;
         let path = [[sx, sy]];
         let reached = false;
 
         for (let r = 0; r <= maxReflections; r++) {
             const hit = castRay(cx, cy, rdx, rdy);
             if (!hit) break;
-
-            // Check if target is reachable before this wall
             const toTx = tx - cx, toTy = ty - cy;
             const tDist = Math.sqrt(toTx * toTx + toTy * toTy);
             const tDx = toTx / tDist, tDy = toTy / tDist;
             const losCheck = castRay(cx, cy, tDx, tDy);
             if (!losCheck || losCheck.t >= tDist - 0.5) {
-                totalDist += tDist;
-                path.push([tx, ty]);
-                reached = true;
-                break;
+                totalDist += tDist; path.push([tx, ty]); reached = true; break;
             }
-
-            totalDist += hit.t;
-            path.push([hit.x, hit.y]);
-            refs++;
-
-            // Reflect direction
+            totalDist += hit.t; path.push([hit.x, hit.y]); refs++;
             let nx = hit.nx, ny = hit.ny;
             const nlen = Math.sqrt(nx * nx + ny * ny);
             nx /= nlen; ny /= nlen;
             const dot = rdx * nx + rdy * ny;
-            rdx = rdx - 2 * dot * nx;
-            rdy = rdy - 2 * dot * ny;
-            cx = hit.x;
-            cy = hit.y;
+            rdx -= 2 * dot * nx; rdy -= 2 * dot * ny;
+            cx = hit.x; cy = hit.y;
         }
-
         if (reached && (!bestResult || totalDist < bestResult.dist)) {
             bestResult = { los: false, dist: totalDist, reflections: refs, path };
         }
     }
-
     if (bestResult) return bestResult;
-    // No path found - use diffraction approximation (NLOS with extra loss)
     return { los: false, dist: directDist * 1.4, reflections: maxReflections, path: [[sx, sy], [tx, ty]], diffracted: true };
 }
 
-// Path loss calculation (Close-In free space reference with frequency)
 function calcPathLoss(distM, freqGHz, nReflections, isLos, refLossDb) {
     if (distM < 1) distM = 1;
-    const d0 = 1; // 1m reference
     const lambda = 0.3 / freqGHz;
-    const fspl0 = 20 * Math.log10(4 * Math.PI * d0 / lambda);
-    const n = isLos ? 2.0 : 3.2; // path loss exponent
-    const PL = fspl0 + 10 * n * Math.log10(distM / d0) + nReflections * refLossDb;
-    return PL;
+    const fspl0 = 20 * Math.log10(4 * Math.PI / lambda);
+    const n = isLos ? 2.0 : 3.2;
+    return fspl0 + 10 * n * Math.log10(distM) + nReflections * refLossDb;
 }
 
 function calcRSSI(distM, freqGHz, nReflections, isLos) {
     const txPower = parseFloat(document.getElementById('txPower').value);
     const txGain = parseFloat(document.getElementById('txGain').value);
     const refLoss = parseFloat(document.getElementById('refLoss').value);
-    const PL = calcPathLoss(distM, freqGHz, nReflections, isLos, refLoss);
-    return txPower + txGain - PL;
+    return txPower + txGain - calcPathLoss(distM, freqGHz, nReflections, isLos, refLoss);
 }
 
-function recalculate() {
+function rssiToColor(rssi) {
+    const t = Math.max(0, Math.min(1, (rssi + 120) / 90));
+    let r, g, b;
+    if (t < 0.25) { r = 0; g = 0; b = 128 + t * 4 * 127; }
+    else if (t < 0.5) { r = 0; g = (t - 0.25) * 4 * 255; b = 255; }
+    else if (t < 0.75) { r = (t - 0.5) * 4 * 255; g = 255; b = 255 - (t - 0.5) * 4 * 255; }
+    else { r = 255; g = 255 - (t - 0.75) * 4 * 255; b = 0; }
+    return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+}
+
+function rssiToCSS(rssi) {
+    const c = rssiToColor(rssi);
+    return `rgb(${(c >> 16) & 0xff},${(c >> 8) & 0xff},${c & 0xff})`;
+}
+
+// === HEATMAP RENDERING ===
+function renderHeatmap() {
     const freq = parseFloat(document.getElementById('freq').value);
     const maxRef = parseInt(document.getElementById('maxRef').value);
     const gridRes = parseInt(document.getElementById('gridRes').value);
-
-    // Calculate heatmap
     const gw = Math.ceil(MAP_W / gridRes);
     const gh = Math.ceil(MAP_H / gridRes);
-    heatmap = new Float32Array(gw * gh);
 
+    heatmapCanvas.width = gw;
+    heatmapCanvas.height = gh;
+
+    const imgData = heatmapCtx.createImageData(gw, gh);
     for (let gy = 0; gy < gh; gy++) {
         for (let gx = 0; gx < gw; gx++) {
             const px = (gx + 0.5) * gridRes;
             const py = (gy + 0.5) * gridRes;
+            const idx = (gy * gw + gx) * 4;
             if (isInsideBuilding(px, py)) {
-                heatmap[gy * gw + gx] = -999;
+                imgData.data[idx] = 0; imgData.data[idx+1] = 0; imgData.data[idx+2] = 0; imgData.data[idx+3] = 0;
                 continue;
             }
             let bestRSSI = -200;
             for (const bs of baseStations) {
-                if (bs.x < 0 || bs.x > MAP_W || bs.y < 0 || bs.y > MAP_H) continue;
                 const result = traceRay(bs.x, bs.y, px, py, maxRef);
                 const rssi = calcRSSI(result.dist, freq, result.reflections, result.los);
                 if (rssi > bestRSSI) bestRSSI = rssi;
             }
-            heatmap[gy * gw + gx] = bestRSSI;
+            const c = rssiToColor(bestRSSI);
+            imgData.data[idx] = (c >> 16) & 0xff;
+            imgData.data[idx+1] = (c >> 8) & 0xff;
+            imgData.data[idx+2] = c & 0xff;
+            imgData.data[idx+3] = 140;
         }
     }
-    heatmap._gw = gw;
-    heatmap._gh = gh;
-    heatmap._gridRes = gridRes;
+    heatmapCtx.putImageData(imgData, 0, 0);
+    heatmapTexture.needsUpdate = true;
+}
 
-    // Calculate per-user results
+// === MAIN RECALCULATE ===
+function recalculate() {
+    const freq = parseFloat(document.getElementById('freq').value);
+    const maxRef = parseInt(document.getElementById('maxRef').value);
+
     userResults = mobileUsers.map(u => {
         let best = { rssi: -200, bsIdx: 0, trace: null };
         for (let i = 0; i < baseStations.length; i++) {
             const bs = baseStations[i];
             const result = traceRay(bs.x, bs.y, u.x, u.y, maxRef);
             const rssi = calcRSSI(result.dist, freq, result.reflections, result.los);
-            if (rssi > best.rssi) {
-                best = { rssi, bsIdx: i, trace: result };
-            }
+            if (rssi > best.rssi) best = { rssi, bsIdx: i, trace: result };
         }
         return best;
     });
 
+    if (document.getElementById('showHeatmap').checked) renderHeatmap();
+    heatmapPlane.visible = document.getElementById('showHeatmap').checked;
+
+    createBSMeshes();
+    createUserMeshes();
+    createRayLines();
     updateStats();
-    draw();
+    updateBSList();
 }
 
 function updateStats() {
@@ -388,249 +758,119 @@ function updateStats() {
     if (userResults.length === 0) { el.textContent = 'No users'; return; }
     const rssis = userResults.map(r => r.rssi);
     const avg = rssis.reduce((a, b) => a + b, 0) / rssis.length;
-    const min = Math.min(...rssis);
-    const max = Math.max(...rssis);
     const covered = rssis.filter(r => r > -100).length;
     el.innerHTML = `Users: ${mobileUsers.length}<br>
         Avg RSSI: ${avg.toFixed(1)} dBm<br>
-        Min: ${min.toFixed(1)} dBm | Max: ${max.toFixed(1)} dBm<br>
+        Min: ${Math.min(...rssis).toFixed(1)} | Max: ${Math.max(...rssis).toFixed(1)} dBm<br>
         Coverage (>-100dBm): ${covered}/${mobileUsers.length} (${(100*covered/mobileUsers.length).toFixed(0)}%)<br>
         LOS users: ${userResults.filter(r=>r.trace&&r.trace.los).length}`;
 }
 
-// Color mapping for signal strength
-function rssiColor(rssi, alpha = 1) {
-    if (rssi < -999) return `rgba(40,40,40,${alpha})`;
-    const t = Math.max(0, Math.min(1, (rssi + 120) / 90)); // -120 to -30
-    let r, g, b;
-    if (t < 0.25) { r = 0; g = 0; b = Math.round(128 + t * 4 * 127); }
-    else if (t < 0.5) { r = 0; g = Math.round((t - 0.25) * 4 * 255); b = 255; }
-    else if (t < 0.75) { r = Math.round((t - 0.5) * 4 * 255); g = 255; b = Math.round(255 - (t - 0.5) * 4 * 255); }
-    else { r = 255; g = Math.round(255 - (t - 0.75) * 4 * 255); b = 0; }
-    return `rgba(${r},${g},${b},${alpha})`;
+function updateBSList() {
+    document.getElementById('bsList').innerHTML = baseStations.map((bs, i) =>
+        `<div class="bs-item"><strong>${bs.label}</strong> — (${bs.x.toFixed(0)}m, ${bs.y.toFixed(0)}m) h=${(bs._height||30).toFixed(0)}m</div>`
+    ).join('');
 }
 
-function mToScreen(mx, my) {
-    const scaleX = W / MAP_W;
-    const scaleY = H / MAP_H;
-    const s = Math.min(scaleX, scaleY);
-    const offX = (W - MAP_W * s) / 2;
-    const offY = (H - MAP_H * s) / 2;
-    return { x: mx * s + offX, y: my * s + offY, s };
-}
+// === DRAG BASE STATIONS ===
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let draggedBS = -1;
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const intersection = new THREE.Vector3();
 
-function screenToM(sx, sy) {
-    const scaleX = W / MAP_W;
-    const scaleY = H / MAP_H;
-    const s = Math.min(scaleX, scaleY);
-    const offX = (W - MAP_W * s) / 2;
-    const offY = (H - MAP_H * s) / 2;
-    return { x: (sx - offX) / s, y: (sy - offY) / s };
-}
+renderer.domElement.addEventListener('pointerdown', e => {
+    mouse.x = (e.offsetX / renderer.domElement.clientWidth) * 2 - 1;
+    mouse.y = -(e.offsetY / renderer.domElement.clientHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
 
-function draw() {
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, W, H);
-
-    const scaleX = W / MAP_W;
-    const scaleY = H / MAP_H;
-    const s = Math.min(scaleX, scaleY);
-    const offX = (W - MAP_W * s) / 2;
-    const offY = (H - MAP_H * s) / 2;
-
-    // Draw heatmap
-    if (document.getElementById('showHeatmap').checked && heatmap) {
-        const gw = heatmap._gw, gh = heatmap._gh, gr = heatmap._gridRes;
-        for (let gy = 0; gy < gh; gy++) {
-            for (let gx = 0; gx < gw; gx++) {
-                const val = heatmap[gy * gw + gx];
-                if (val < -998) continue;
-                ctx.fillStyle = rssiColor(val, 0.5);
-                ctx.fillRect(offX + gx * gr * s, offY + gy * gr * s, gr * s + 1, gr * s + 1);
-            }
-        }
-    }
-
-    // Draw buildings
-    for (const b of buildings) {
-        ctx.beginPath();
-        ctx.moveTo(offX + b.pts[0][0] * s, offY + b.pts[0][1] * s);
-        for (let i = 1; i < b.pts.length; i++) {
-            ctx.lineTo(offX + b.pts[i][0] * s, offY + b.pts[i][1] * s);
-        }
-        ctx.closePath();
-        ctx.fillStyle = '#2a2a3e';
-        ctx.strokeStyle = '#444';
-        ctx.lineWidth = 1;
-        ctx.fill();
-        ctx.stroke();
-    }
-
-    // Draw rays
-    if (document.getElementById('showRays').checked) {
-        for (let i = 0; i < userResults.length; i++) {
-            const r = userResults[i];
-            if (!r.trace || !r.trace.path) continue;
-            const path = r.trace.path;
-            ctx.beginPath();
-            ctx.moveTo(offX + path[0][0] * s, offY + path[0][1] * s);
-            for (let j = 1; j < path.length; j++) {
-                ctx.lineTo(offX + path[j][0] * s, offY + path[j][1] * s);
-            }
-            ctx.strokeStyle = r.trace.los ? 'rgba(0,255,150,0.4)' : 'rgba(255,200,0,0.3)';
-            ctx.lineWidth = r.trace.los ? 1.5 : 1;
-            ctx.stroke();
-        }
-    }
-
-    // Draw users
-    if (document.getElementById('showUsers').checked) {
-        for (let i = 0; i < mobileUsers.length; i++) {
-            const u = mobileUsers[i];
-            const sx = offX + u.x * s, sy = offY + u.y * s;
-            ctx.beginPath();
-            ctx.arc(sx, sy, 4, 0, 2 * Math.PI);
-            ctx.fillStyle = userResults[i] ? rssiColor(userResults[i].rssi) : '#66f';
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-        }
-    }
-
-    // Draw base stations
-    for (let i = 0; i < baseStations.length; i++) {
-        const bs = baseStations[i];
-        const sx = offX + bs.x * s, sy = offY + bs.y * s;
-        // Triangle marker
-        ctx.beginPath();
-        ctx.moveTo(sx, sy - 10);
-        ctx.lineTo(sx - 7, sy + 6);
-        ctx.lineTo(sx + 7, sy + 6);
-        ctx.closePath();
-        ctx.fillStyle = '#e94560';
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        // Label
-        ctx.fillStyle = '#fff';
-        ctx.font = '10px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(bs.label, sx, sy + 18);
-    }
-
-    // Draw street names
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Piccadilly Circus', offX + 450 * s, offY + 330 * s);
-    ctx.fillText('Regent St', offX + 240 * s, offY + 200 * s);
-    ctx.fillText('Shaftesbury Ave', offX + 500 * s, offY + 160 * s);
-    ctx.fillText('Coventry St', offX + 550 * s, offY + 260 * s);
-    ctx.fillText('Haymarket', offX + 420 * s, offY + 430 * s);
-
-    // Scale bar
-    const barM = 100;
-    const barPx = barM * s;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(offX + 10, offY + MAP_H * s - 20, barPx, 3);
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText('100m', offX + 10, offY + MAP_H * s - 25);
-}
-
-// Legend gradient
-function drawLegend() {
-    const bar = document.getElementById('legendBar');
-    bar.style.background = 'linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000)';
-}
-drawLegend();
-
-// Dragging
-let dragIdx = -1;
-let dragOffset = { x: 0, y: 0 };
-
-canvas.addEventListener('mousedown', e => {
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const m = screenToM(sx, sy);
-
-    for (let i = 0; i < baseStations.length; i++) {
-        const bs = baseStations[i];
-        const dx = m.x - bs.x, dy = m.y - bs.y;
-        if (dx * dx + dy * dy < 400) {
-            dragIdx = i;
-            dragOffset = { x: dx, y: dy };
-            canvas.style.cursor = 'grabbing';
+    for (let i = 0; i < bsMeshes.length; i++) {
+        const hits = raycaster.intersectObject(bsMeshes[i], true);
+        if (hits.length > 0) {
+            draggedBS = i;
+            controls.enabled = false;
+            dragPlane.constant = -(baseStations[i]._height || 30);
+            renderer.domElement.style.cursor = 'grabbing';
             return;
         }
     }
 });
 
-canvas.addEventListener('mousemove', e => {
-    if (dragIdx < 0) return;
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
-    const m = screenToM(sx, sy);
-    baseStations[dragIdx].x = Math.max(0, Math.min(MAP_W, m.x - dragOffset.x));
-    baseStations[dragIdx].y = Math.max(0, Math.min(MAP_H, m.y - dragOffset.y));
-    draw();
-    updateBSList();
+renderer.domElement.addEventListener('pointermove', e => {
+    if (draggedBS < 0) return;
+    mouse.x = (e.offsetX / renderer.domElement.clientWidth) * 2 - 1;
+    mouse.y = -(e.offsetY / renderer.domElement.clientHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    if (raycaster.ray.intersectPlane(dragPlane, intersection)) {
+        baseStations[draggedBS].x = Math.max(0, Math.min(MAP_W, intersection.x));
+        baseStations[draggedBS].y = Math.max(0, Math.min(MAP_H, intersection.z));
+        bsMeshes[draggedBS].position.set(baseStations[draggedBS].x, 0, baseStations[draggedBS].y);
+        updateBSList();
+    }
 });
 
-canvas.addEventListener('mouseup', () => {
-    if (dragIdx >= 0) {
-        dragIdx = -1;
-        canvas.style.cursor = 'default';
+renderer.domElement.addEventListener('pointerup', () => {
+    if (draggedBS >= 0) {
+        draggedBS = -1;
+        controls.enabled = true;
+        renderer.domElement.style.cursor = 'default';
         recalculate();
     }
 });
 
-canvas.addEventListener('mouseleave', () => {
-    if (dragIdx >= 0) {
-        dragIdx = -1;
-        canvas.style.cursor = 'default';
-        recalculate();
-    }
+// === CAMERA VIEWS ===
+document.getElementById('viewTop').addEventListener('click', () => {
+    camera.position.set(CX, 700, CZ + 1);
+    controls.target.set(CX, 0, CZ);
+    controls.update();
+});
+document.getElementById('viewAngle').addEventListener('click', () => {
+    camera.position.set(CX - 300, 400, CZ + 500);
+    controls.target.set(CX, 0, CZ);
+    controls.update();
+});
+document.getElementById('viewStreet').addEventListener('click', () => {
+    camera.position.set(450, 8, 420);
+    controls.target.set(450, 8, 300);
+    controls.update();
 });
 
-// UI controls
-function updateBSList() {
-    const el = document.getElementById('bsList');
-    el.innerHTML = baseStations.map((bs, i) =>
-        `<div class="bs-item" data-idx="${i}">
-            <strong>${bs.label}</strong> — (${bs.x.toFixed(0)}m, ${bs.y.toFixed(0)}m)
-        </div>`
-    ).join('');
-}
-
+// === UI EVENTS ===
 document.getElementById('btnReset').addEventListener('click', () => {
     baseStations = defaultBS.map(b => ({ ...b }));
-    updateBSList();
     recalculate();
 });
-
 document.getElementById('btnRandomUsers').addEventListener('click', () => {
     generateUsers(40);
     recalculate();
 });
-
 document.getElementById('btnRecalc').addEventListener('click', recalculate);
 
 ['freq', 'txPower', 'txGain', 'maxRef', 'refLoss', 'gridRes'].forEach(id => {
     document.getElementById(id).addEventListener('change', recalculate);
 });
-['showRays', 'showUsers', 'showHeatmap'].forEach(id => {
-    document.getElementById(id).addEventListener('change', draw);
+document.getElementById('showRays').addEventListener('change', () => { createRayLines(); });
+document.getElementById('showUsers').addEventListener('change', () => { userGroup.visible = document.getElementById('showUsers').checked; });
+document.getElementById('showHeatmap').addEventListener('change', () => { heatmapPlane.visible = document.getElementById('showHeatmap').checked; });
+
+// === RESIZE ===
+window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
 });
 
-// Init
+// === ANIMATION LOOP ===
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+// === INIT ===
 generateUsers(40);
-updateBSList();
-setTimeout(resize, 50);
+recalculate();
+animate();
 </script>
 </body>
 </html>
