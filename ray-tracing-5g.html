@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>5G NR Ray Tracing — Piccadilly Circus, London</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+#ui { position: absolute; top: 0; left: 0; width: 300px; height: 100vh; background: #16213e; padding: 16px; overflow-y: auto; z-index: 10; border-right: 1px solid #0f3460; }
+#ui h1 { font-size: 16px; margin-bottom: 8px; color: #e94560; }
+#ui h2 { font-size: 13px; margin: 12px 0 6px; color: #0f9; }
+#ui label { display: block; font-size: 12px; margin: 4px 0 2px; color: #aaa; }
+#ui input[type=range], #ui input[type=number] { width: 100%; }
+#ui .param-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+#ui .param-row label { flex: 1; }
+#ui .param-row input { width: 80px; }
+#ui .bs-list { margin: 8px 0; }
+#ui .bs-item { background: #0f3460; border-radius: 4px; padding: 6px 8px; margin: 4px 0; font-size: 11px; cursor: pointer; }
+#ui .bs-item:hover { background: #1a4a7a; }
+#ui .bs-item.selected { border: 1px solid #e94560; }
+#ui button { background: #e94560; border: none; color: #fff; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; margin: 4px 2px; }
+#ui button:hover { background: #ff6b6b; }
+#ui .info { font-size: 11px; color: #888; margin-top: 12px; line-height: 1.5; }
+#canvas-container { position: absolute; top: 0; left: 300px; right: 0; bottom: 0; }
+canvas { display: block; width: 100%; height: 100%; }
+#legend { position: absolute; bottom: 16px; right: 16px; background: rgba(22,33,62,0.9); padding: 10px; border-radius: 6px; font-size: 11px; }
+#legend .bar { width: 200px; height: 14px; border-radius: 3px; margin: 4px 0; }
+#legend .labels { display: flex; justify-content: space-between; font-size: 10px; color: #aaa; }
+</style>
+</head>
+<body>
+<div id="ui">
+    <h1>5G NR Ray Tracing Model</h1>
+    <p style="font-size:11px;color:#aaa;margin-bottom:8px;">Piccadilly Circus, London — 8.4 GHz</p>
+
+    <h2>Simulation Parameters</h2>
+    <div class="param-row">
+        <label>Frequency (GHz):</label>
+        <input type="number" id="freq" value="8.4" step="0.1" min="0.5" max="100">
+    </div>
+    <div class="param-row">
+        <label>TX Power (dBm):</label>
+        <input type="number" id="txPower" value="43" step="1" min="10" max="60">
+    </div>
+    <div class="param-row">
+        <label>TX Gain (dBi):</label>
+        <input type="number" id="txGain" value="24" step="1" min="0" max="30">
+    </div>
+    <div class="param-row">
+        <label>Max Reflections:</label>
+        <input type="number" id="maxRef" value="3" step="1" min="0" max="5">
+    </div>
+    <div class="param-row">
+        <label>Reflection Loss (dB):</label>
+        <input type="number" id="refLoss" value="6" step="0.5" min="1" max="15">
+    </div>
+    <div class="param-row">
+        <label>Grid Resolution:</label>
+        <input type="range" id="gridRes" value="8" min="4" max="20">
+    </div>
+    <label style="margin-top:6px;">
+        <input type="checkbox" id="showRays" checked> Show Rays
+    </label>
+    <label>
+        <input type="checkbox" id="showUsers" checked> Show Mobile Users
+    </label>
+    <label>
+        <input type="checkbox" id="showHeatmap" checked> Show Coverage Heatmap
+    </label>
+
+    <h2>Base Stations (drag to move)</h2>
+    <div class="bs-list" id="bsList"></div>
+    <button id="btnReset">Reset Positions</button>
+    <button id="btnRandomUsers">Randomize Users</button>
+    <button id="btnRecalc">Recalculate</button>
+
+    <h2>User Statistics</h2>
+    <div id="stats" style="font-size:11px;color:#ccc;"></div>
+
+    <div class="info">
+        <strong>Instructions:</strong><br>
+        • Drag red triangles to reposition base stations<br>
+        • Blue dots are mobile users (outdoor)<br>
+        • Heatmap shows received signal strength<br>
+        • Rays show dominant propagation paths<br>
+        • ISD: 450m | Freq: 8.4 GHz (FR2-like)
+    </div>
+</div>
+
+<div id="canvas-container">
+    <canvas id="canvas"></canvas>
+</div>
+
+<div id="legend">
+    <div>Signal Strength (dBm)</div>
+    <div class="bar" id="legendBar"></div>
+    <div class="labels"><span>-120</span><span>-90</span><span>-60</span><span>-30</span></div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const container = document.getElementById('canvas-container');
+
+const SCALE = 2.5; // pixels per meter
+const MAP_W = 900; // meters width of map area
+const MAP_H = 700; // meters height of map area
+
+let W, H;
+function resize() {
+    W = container.clientWidth;
+    H = container.clientHeight;
+    canvas.width = W;
+    canvas.height = H;
+    recalculate();
+}
+window.addEventListener('resize', resize);
+
+// Piccadilly Circus approximate building footprints (simplified polygons in meters from top-left)
+// Origin (0,0) is top-left of the map area; Piccadilly Circus center ~ (450, 350)
+const buildings = [
+    // Block NW of circus
+    { pts: [[280,120],[380,120],[380,220],[340,240],[280,240]], h: 28 },
+    // Criterion Theatre / south side
+    { pts: [[340,380],[500,380],[500,440],[340,440]], h: 22 },
+    // Trocadero block
+    { pts: [[180,280],[280,280],[280,380],[180,380]], h: 35 },
+    // Shaftesbury Avenue north
+    { pts: [[400,100],[540,100],[540,180],[400,180]], h: 30 },
+    // Regent Street west block
+    { pts: [[120,140],[200,140],[200,320],[120,320]], h: 32 },
+    // Coventry Street block
+    { pts: [[500,200],[640,200],[640,300],[500,300]], h: 26 },
+    // Haymarket block
+    { pts: [[380,460],[520,460],[520,560],[380,560]], h: 24 },
+    // Lower Regent St block
+    { pts: [[540,340],[680,340],[680,460],[540,460]], h: 30 },
+    // Jermyn Street block
+    { pts: [[200,460],[360,460],[360,580],[200,580]], h: 20 },
+    // Glasshouse St block
+    { pts: [[100,380],[180,380],[180,500],[100,500]], h: 25 },
+    // Air Street block
+    { pts: [[280,260],[340,260],[340,360],[280,360]], h: 27 },
+    // Denman Street block
+    { pts: [[180,580],[320,580],[320,650],[180,650]], h: 22 },
+    // Piccadilly south
+    { pts: [[520,480],[700,480],[700,580],[520,580]], h: 28 },
+    // Warwick block
+    { pts: [[680,100],[800,100],[800,240],[680,240]], h: 32 },
+    // NE block
+    { pts: [[600,60],[760,60],[760,140],[600,140]], h: 26 },
+    // SW block
+    { pts: [[60,500],[140,500],[140,620],[60,620]], h: 24 },
+    // East block
+    { pts: [[720,300],[850,300],[850,420],[720,420]], h: 30 },
+    // Far south
+    { pts: [[340,600],[500,600],[500,680],[340,680]], h: 22 },
+];
+
+// Convert building polygons to edges for ray intersection
+function getBuildingEdges() {
+    const edges = [];
+    for (const b of buildings) {
+        const pts = b.pts;
+        for (let i = 0; i < pts.length; i++) {
+            const j = (i + 1) % pts.length;
+            edges.push({ x1: pts[i][0], y1: pts[i][1], x2: pts[j][0], y2: pts[j][1] });
+        }
+    }
+    return edges;
+}
+const allEdges = getBuildingEdges();
+
+// Initial BS positions (rooftop-mounted, ISD ~450m hexagonal-ish layout around center 450,350)
+const ISD = 450;
+const CENTER = { x: 450, y: 350 };
+const defaultBS = [
+    { x: 450, y: 350, label: 'BS1' },
+    { x: 450 + ISD * 0.5, y: 350 - ISD * 0.433, label: 'BS2' },
+    { x: 450 + ISD * 0.5, y: 350 + ISD * 0.433, label: 'BS3' },
+    { x: 450 - ISD * 0.5, y: 350 - ISD * 0.433, label: 'BS4' },
+    { x: 450 - ISD * 0.5, y: 350 + ISD * 0.433, label: 'BS5' },
+    { x: 450 + ISD, y: 350, label: 'BS6' },
+    { x: 450 - ISD, y: 350, label: 'BS7' },
+];
+
+let baseStations = defaultBS.map(b => ({ ...b }));
+let mobileUsers = [];
+let heatmap = null;
+let userResults = [];
+
+function generateUsers(n = 40) {
+    mobileUsers = [];
+    for (let i = 0; i < n; i++) {
+        let x, y, attempts = 0;
+        do {
+            x = 50 + Math.random() * (MAP_W - 100);
+            y = 50 + Math.random() * (MAP_H - 100);
+            attempts++;
+        } while (isInsideBuilding(x, y) && attempts < 100);
+        if (attempts < 100) mobileUsers.push({ x, y });
+    }
+}
+
+function isInsideBuilding(px, py) {
+    for (const b of buildings) {
+        if (pointInPolygon(px, py, b.pts)) return true;
+    }
+    return false;
+}
+
+function pointInPolygon(px, py, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i][0], yi = pts[i][1];
+        const xj = pts[j][0], yj = pts[j][1];
+        if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// Ray-segment intersection
+function raySegIntersect(ox, oy, dx, dy, x1, y1, x2, y2) {
+    const ex = x2 - x1, ey = y2 - y1;
+    const denom = dx * ey - dy * ex;
+    if (Math.abs(denom) < 1e-10) return null;
+    const t = ((x1 - ox) * ey - (y1 - oy) * ex) / denom;
+    const u = ((x1 - ox) * dy - (y1 - oy) * dx) / denom;
+    if (t > 0.001 && u >= 0 && u <= 1) {
+        return { t, x: ox + dx * t, y: oy + dy * t, nx: -ey, ny: ex, u };
+    }
+    return null;
+}
+
+// Find nearest intersection along a ray
+function castRay(ox, oy, dx, dy) {
+    let nearest = null;
+    let minT = Infinity;
+    for (const e of allEdges) {
+        const hit = raySegIntersect(ox, oy, dx, dy, e.x1, e.y1, e.x2, e.y2);
+        if (hit && hit.t < minT) {
+            minT = hit.t;
+            nearest = hit;
+        }
+    }
+    return nearest;
+}
+
+// Trace ray with reflections, return total path length and number of reflections
+function traceRay(sx, sy, tx, ty, maxReflections) {
+    let dx = tx - sx, dy = ty - sy;
+    const directDist = Math.sqrt(dx * dx + dy * dy);
+    const len = directDist;
+    dx /= len; dy /= len;
+
+    // Check LOS first
+    const losHit = castRay(sx, sy, dx, dy);
+    if (!losHit || losHit.t >= directDist - 0.5) {
+        return { los: true, dist: directDist, reflections: 0, path: [[sx, sy], [tx, ty]] };
+    }
+
+    // Try reflected paths (simplified: shoot rays in spread directions)
+    let bestResult = null;
+    const angles = 36;
+    for (let a = 0; a < angles; a++) {
+        const ang = (a / angles) * 2 * Math.PI;
+        let rdx = Math.cos(ang), rdy = Math.sin(ang);
+        let cx = sx, cy = sy;
+        let totalDist = 0;
+        let refs = 0;
+        let path = [[sx, sy]];
+        let reached = false;
+
+        for (let r = 0; r <= maxReflections; r++) {
+            const hit = castRay(cx, cy, rdx, rdy);
+            if (!hit) break;
+
+            // Check if target is reachable before this wall
+            const toTx = tx - cx, toTy = ty - cy;
+            const tDist = Math.sqrt(toTx * toTx + toTy * toTy);
+            const tDx = toTx / tDist, tDy = toTy / tDist;
+            const losCheck = castRay(cx, cy, tDx, tDy);
+            if (!losCheck || losCheck.t >= tDist - 0.5) {
+                totalDist += tDist;
+                path.push([tx, ty]);
+                reached = true;
+                break;
+            }
+
+            totalDist += hit.t;
+            path.push([hit.x, hit.y]);
+            refs++;
+
+            // Reflect direction
+            let nx = hit.nx, ny = hit.ny;
+            const nlen = Math.sqrt(nx * nx + ny * ny);
+            nx /= nlen; ny /= nlen;
+            const dot = rdx * nx + rdy * ny;
+            rdx = rdx - 2 * dot * nx;
+            rdy = rdy - 2 * dot * ny;
+            cx = hit.x;
+            cy = hit.y;
+        }
+
+        if (reached && (!bestResult || totalDist < bestResult.dist)) {
+            bestResult = { los: false, dist: totalDist, reflections: refs, path };
+        }
+    }
+
+    if (bestResult) return bestResult;
+    // No path found - use diffraction approximation (NLOS with extra loss)
+    return { los: false, dist: directDist * 1.4, reflections: maxReflections, path: [[sx, sy], [tx, ty]], diffracted: true };
+}
+
+// Path loss calculation (Close-In free space reference with frequency)
+function calcPathLoss(distM, freqGHz, nReflections, isLos, refLossDb) {
+    if (distM < 1) distM = 1;
+    const d0 = 1; // 1m reference
+    const lambda = 0.3 / freqGHz;
+    const fspl0 = 20 * Math.log10(4 * Math.PI * d0 / lambda);
+    const n = isLos ? 2.0 : 3.2; // path loss exponent
+    const PL = fspl0 + 10 * n * Math.log10(distM / d0) + nReflections * refLossDb;
+    return PL;
+}
+
+function calcRSSI(distM, freqGHz, nReflections, isLos) {
+    const txPower = parseFloat(document.getElementById('txPower').value);
+    const txGain = parseFloat(document.getElementById('txGain').value);
+    const refLoss = parseFloat(document.getElementById('refLoss').value);
+    const PL = calcPathLoss(distM, freqGHz, nReflections, isLos, refLoss);
+    return txPower + txGain - PL;
+}
+
+function recalculate() {
+    const freq = parseFloat(document.getElementById('freq').value);
+    const maxRef = parseInt(document.getElementById('maxRef').value);
+    const gridRes = parseInt(document.getElementById('gridRes').value);
+
+    // Calculate heatmap
+    const gw = Math.ceil(MAP_W / gridRes);
+    const gh = Math.ceil(MAP_H / gridRes);
+    heatmap = new Float32Array(gw * gh);
+
+    for (let gy = 0; gy < gh; gy++) {
+        for (let gx = 0; gx < gw; gx++) {
+            const px = (gx + 0.5) * gridRes;
+            const py = (gy + 0.5) * gridRes;
+            if (isInsideBuilding(px, py)) {
+                heatmap[gy * gw + gx] = -999;
+                continue;
+            }
+            let bestRSSI = -200;
+            for (const bs of baseStations) {
+                if (bs.x < 0 || bs.x > MAP_W || bs.y < 0 || bs.y > MAP_H) continue;
+                const result = traceRay(bs.x, bs.y, px, py, maxRef);
+                const rssi = calcRSSI(result.dist, freq, result.reflections, result.los);
+                if (rssi > bestRSSI) bestRSSI = rssi;
+            }
+            heatmap[gy * gw + gx] = bestRSSI;
+        }
+    }
+    heatmap._gw = gw;
+    heatmap._gh = gh;
+    heatmap._gridRes = gridRes;
+
+    // Calculate per-user results
+    userResults = mobileUsers.map(u => {
+        let best = { rssi: -200, bsIdx: 0, trace: null };
+        for (let i = 0; i < baseStations.length; i++) {
+            const bs = baseStations[i];
+            const result = traceRay(bs.x, bs.y, u.x, u.y, maxRef);
+            const rssi = calcRSSI(result.dist, freq, result.reflections, result.los);
+            if (rssi > best.rssi) {
+                best = { rssi, bsIdx: i, trace: result };
+            }
+        }
+        return best;
+    });
+
+    updateStats();
+    draw();
+}
+
+function updateStats() {
+    const el = document.getElementById('stats');
+    if (userResults.length === 0) { el.textContent = 'No users'; return; }
+    const rssis = userResults.map(r => r.rssi);
+    const avg = rssis.reduce((a, b) => a + b, 0) / rssis.length;
+    const min = Math.min(...rssis);
+    const max = Math.max(...rssis);
+    const covered = rssis.filter(r => r > -100).length;
+    el.innerHTML = `Users: ${mobileUsers.length}<br>
+        Avg RSSI: ${avg.toFixed(1)} dBm<br>
+        Min: ${min.toFixed(1)} dBm | Max: ${max.toFixed(1)} dBm<br>
+        Coverage (>-100dBm): ${covered}/${mobileUsers.length} (${(100*covered/mobileUsers.length).toFixed(0)}%)<br>
+        LOS users: ${userResults.filter(r=>r.trace&&r.trace.los).length}`;
+}
+
+// Color mapping for signal strength
+function rssiColor(rssi, alpha = 1) {
+    if (rssi < -999) return `rgba(40,40,40,${alpha})`;
+    const t = Math.max(0, Math.min(1, (rssi + 120) / 90)); // -120 to -30
+    let r, g, b;
+    if (t < 0.25) { r = 0; g = 0; b = Math.round(128 + t * 4 * 127); }
+    else if (t < 0.5) { r = 0; g = Math.round((t - 0.25) * 4 * 255); b = 255; }
+    else if (t < 0.75) { r = Math.round((t - 0.5) * 4 * 255); g = 255; b = Math.round(255 - (t - 0.5) * 4 * 255); }
+    else { r = 255; g = Math.round(255 - (t - 0.75) * 4 * 255); b = 0; }
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function mToScreen(mx, my) {
+    const scaleX = W / MAP_W;
+    const scaleY = H / MAP_H;
+    const s = Math.min(scaleX, scaleY);
+    const offX = (W - MAP_W * s) / 2;
+    const offY = (H - MAP_H * s) / 2;
+    return { x: mx * s + offX, y: my * s + offY, s };
+}
+
+function screenToM(sx, sy) {
+    const scaleX = W / MAP_W;
+    const scaleY = H / MAP_H;
+    const s = Math.min(scaleX, scaleY);
+    const offX = (W - MAP_W * s) / 2;
+    const offY = (H - MAP_H * s) / 2;
+    return { x: (sx - offX) / s, y: (sy - offY) / s };
+}
+
+function draw() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+
+    const scaleX = W / MAP_W;
+    const scaleY = H / MAP_H;
+    const s = Math.min(scaleX, scaleY);
+    const offX = (W - MAP_W * s) / 2;
+    const offY = (H - MAP_H * s) / 2;
+
+    // Draw heatmap
+    if (document.getElementById('showHeatmap').checked && heatmap) {
+        const gw = heatmap._gw, gh = heatmap._gh, gr = heatmap._gridRes;
+        for (let gy = 0; gy < gh; gy++) {
+            for (let gx = 0; gx < gw; gx++) {
+                const val = heatmap[gy * gw + gx];
+                if (val < -998) continue;
+                ctx.fillStyle = rssiColor(val, 0.5);
+                ctx.fillRect(offX + gx * gr * s, offY + gy * gr * s, gr * s + 1, gr * s + 1);
+            }
+        }
+    }
+
+    // Draw buildings
+    for (const b of buildings) {
+        ctx.beginPath();
+        ctx.moveTo(offX + b.pts[0][0] * s, offY + b.pts[0][1] * s);
+        for (let i = 1; i < b.pts.length; i++) {
+            ctx.lineTo(offX + b.pts[i][0] * s, offY + b.pts[i][1] * s);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#2a2a3e';
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 1;
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    // Draw rays
+    if (document.getElementById('showRays').checked) {
+        for (let i = 0; i < userResults.length; i++) {
+            const r = userResults[i];
+            if (!r.trace || !r.trace.path) continue;
+            const path = r.trace.path;
+            ctx.beginPath();
+            ctx.moveTo(offX + path[0][0] * s, offY + path[0][1] * s);
+            for (let j = 1; j < path.length; j++) {
+                ctx.lineTo(offX + path[j][0] * s, offY + path[j][1] * s);
+            }
+            ctx.strokeStyle = r.trace.los ? 'rgba(0,255,150,0.4)' : 'rgba(255,200,0,0.3)';
+            ctx.lineWidth = r.trace.los ? 1.5 : 1;
+            ctx.stroke();
+        }
+    }
+
+    // Draw users
+    if (document.getElementById('showUsers').checked) {
+        for (let i = 0; i < mobileUsers.length; i++) {
+            const u = mobileUsers[i];
+            const sx = offX + u.x * s, sy = offY + u.y * s;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = userResults[i] ? rssiColor(userResults[i].rssi) : '#66f';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        }
+    }
+
+    // Draw base stations
+    for (let i = 0; i < baseStations.length; i++) {
+        const bs = baseStations[i];
+        const sx = offX + bs.x * s, sy = offY + bs.y * s;
+        // Triangle marker
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 10);
+        ctx.lineTo(sx - 7, sy + 6);
+        ctx.lineTo(sx + 7, sy + 6);
+        ctx.closePath();
+        ctx.fillStyle = '#e94560';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(bs.label, sx, sy + 18);
+    }
+
+    // Draw street names
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Piccadilly Circus', offX + 450 * s, offY + 330 * s);
+    ctx.fillText('Regent St', offX + 240 * s, offY + 200 * s);
+    ctx.fillText('Shaftesbury Ave', offX + 500 * s, offY + 160 * s);
+    ctx.fillText('Coventry St', offX + 550 * s, offY + 260 * s);
+    ctx.fillText('Haymarket', offX + 420 * s, offY + 430 * s);
+
+    // Scale bar
+    const barM = 100;
+    const barPx = barM * s;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(offX + 10, offY + MAP_H * s - 20, barPx, 3);
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('100m', offX + 10, offY + MAP_H * s - 25);
+}
+
+// Legend gradient
+function drawLegend() {
+    const bar = document.getElementById('legendBar');
+    bar.style.background = 'linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000)';
+}
+drawLegend();
+
+// Dragging
+let dragIdx = -1;
+let dragOffset = { x: 0, y: 0 };
+
+canvas.addEventListener('mousedown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const m = screenToM(sx, sy);
+
+    for (let i = 0; i < baseStations.length; i++) {
+        const bs = baseStations[i];
+        const dx = m.x - bs.x, dy = m.y - bs.y;
+        if (dx * dx + dy * dy < 400) {
+            dragIdx = i;
+            dragOffset = { x: dx, y: dy };
+            canvas.style.cursor = 'grabbing';
+            return;
+        }
+    }
+});
+
+canvas.addEventListener('mousemove', e => {
+    if (dragIdx < 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const m = screenToM(sx, sy);
+    baseStations[dragIdx].x = Math.max(0, Math.min(MAP_W, m.x - dragOffset.x));
+    baseStations[dragIdx].y = Math.max(0, Math.min(MAP_H, m.y - dragOffset.y));
+    draw();
+    updateBSList();
+});
+
+canvas.addEventListener('mouseup', () => {
+    if (dragIdx >= 0) {
+        dragIdx = -1;
+        canvas.style.cursor = 'default';
+        recalculate();
+    }
+});
+
+canvas.addEventListener('mouseleave', () => {
+    if (dragIdx >= 0) {
+        dragIdx = -1;
+        canvas.style.cursor = 'default';
+        recalculate();
+    }
+});
+
+// UI controls
+function updateBSList() {
+    const el = document.getElementById('bsList');
+    el.innerHTML = baseStations.map((bs, i) =>
+        `<div class="bs-item" data-idx="${i}">
+            <strong>${bs.label}</strong> — (${bs.x.toFixed(0)}m, ${bs.y.toFixed(0)}m)
+        </div>`
+    ).join('');
+}
+
+document.getElementById('btnReset').addEventListener('click', () => {
+    baseStations = defaultBS.map(b => ({ ...b }));
+    updateBSList();
+    recalculate();
+});
+
+document.getElementById('btnRandomUsers').addEventListener('click', () => {
+    generateUsers(40);
+    recalculate();
+});
+
+document.getElementById('btnRecalc').addEventListener('click', recalculate);
+
+['freq', 'txPower', 'txGain', 'maxRef', 'refLoss', 'gridRes'].forEach(id => {
+    document.getElementById(id).addEventListener('change', recalculate);
+});
+['showRays', 'showUsers', 'showHeatmap'].forEach(id => {
+    document.getElementById(id).addEventListener('change', draw);
+});
+
+// Init
+generateUsers(40);
+updateBSList();
+setTimeout(resize, 50);
+</script>
+</body>
+</html>
