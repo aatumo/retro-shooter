@@ -33,7 +33,7 @@ body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; ov
     <h1>5G NR 3D Ray Tracing</h1>
     <p class="subtitle">Piccadilly Circus, London — 8.4 GHz</p>
 
-    <h2>Simulation Parameters</h2>
+    <h2>3GPP TR 38.901 UMa Parameters</h2>
     <div class="param-row">
         <label>Frequency (GHz):</label>
         <input type="number" id="freq" value="8.4" step="0.1" min="0.5" max="100">
@@ -47,12 +47,32 @@ body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; ov
         <input type="number" id="txGain" value="24" step="1" min="0" max="30">
     </div>
     <div class="param-row">
+        <label>BS Height h<sub>BS</sub> (m):</label>
+        <input type="number" id="hBS" value="25" step="1" min="10" max="150">
+    </div>
+    <div class="param-row">
+        <label>UE Height h<sub>UT</sub> (m):</label>
+        <input type="number" id="hUT" value="1.5" step="0.1" min="1" max="22.5">
+    </div>
+    <div class="param-row">
+        <label>Avg. Building h (m):</label>
+        <input type="number" id="hAvgBuilding" value="20" step="1" min="5" max="50">
+    </div>
+    <div class="param-row">
+        <label>Avg. Street W (m):</label>
+        <input type="number" id="streetW" value="20" step="1" min="5" max="50">
+    </div>
+    <div class="param-row">
         <label>Max Reflections:</label>
         <input type="number" id="maxRef" value="3" step="1" min="0" max="5">
     </div>
     <div class="param-row">
         <label>Reflection Loss (dB):</label>
         <input type="number" id="refLoss" value="6" step="0.5" min="1" max="15">
+    </div>
+    <div class="param-row">
+        <label>Shadow Fading:</label>
+        <input type="checkbox" id="shadowFading"> Enable
     </div>
     <div class="param-row">
         <label>Heatmap Resolution:</label>
@@ -67,6 +87,12 @@ body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; ov
     <label>
         <input type="checkbox" id="showHeatmap" checked> Show Coverage Heatmap
     </label>
+    <div style="margin-top:8px;padding:6px;background:#0a1628;border-radius:4px;font-size:10px;color:#8af;">
+        <strong>Model:</strong> 3GPP TR 38.901 v17.0.0<br>
+        Table 7.4.1-1: UMa (LOS &amp; NLOS)<br>
+        LOS prob: Table 7.4.2-1<br>
+        Applicability: 0.5–100 GHz
+    </div>
 
     <div id="viewBtns">
         <button id="viewTop">Top View</button>
@@ -89,7 +115,12 @@ body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; ov
         • Right-click + drag: Pan<br>
         • Scroll: Zoom<br>
         • Click BS antenna to drag on ground plane<br>
-        • ISD: 450m | Freq: 8.4 GHz
+        <br>
+        <strong>3GPP TR 38.901 R17 UMa:</strong><br>
+        • LOS: PL = 28 + 22·log₁₀(d₃D) + 20·log₁₀(fc)<br>
+        • NLOS: PL = 13.54 + 39.08·log₁₀(d₃D) + 20·log₁₀(fc) − 0.6·(h_UT−1.5)<br>
+        • LOS prob: P = (18/d + e^(-d/63)·(1−18/d))<br>
+        • ISD: 450m | fc: 8.4 GHz | h_BS: 25m
     </div>
 </div>
 
@@ -659,19 +690,102 @@ function traceRay(sx, sy, tx, ty, maxReflections) {
     return { los: false, dist: directDist * 1.4, reflections: maxReflections, path: [[sx, sy], [tx, ty]], diffracted: true };
 }
 
-function calcPathLoss(distM, freqGHz, nReflections, isLos, refLossDb) {
-    if (distM < 1) distM = 1;
-    const lambda = 0.3 / freqGHz;
-    const fspl0 = 20 * Math.log10(4 * Math.PI / lambda);
-    const n = isLos ? 2.0 : 3.2;
-    return fspl0 + 10 * n * Math.log10(distM) + nReflections * refLossDb;
+// =============================================================
+// 3GPP TR 38.901 v17.0.0 — Table 7.4.1-1: UMa Path Loss Model
+// Applicable: 0.5 GHz <= fc <= 100 GHz
+//             10 m <= d2D <= 5000 m
+//             h_BS = 25 m (default), 1.5 m <= h_UT <= 22.5 m
+// =============================================================
+
+function gaussianRandom() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+// LOS probability for UMa — Table 7.4.2-1
+function losProb_UMa(d2D, hUT) {
+    if (d2D <= 18) return 1.0;
+    const C_prime = (hUT <= 13) ? 0 : Math.pow((hUT - 13) / 10, 1.5);
+    const term1 = (18 / d2D) + Math.exp(-d2D / 63) * (1 - 18 / d2D);
+    const term2 = 1 + C_prime * (5 / 4) * Math.pow(d2D / 100, 3) * Math.exp(-d2D / 150);
+    return term1 * term2;
+}
+
+// 3GPP UMa LOS path loss — Table 7.4.1-1
+function PL_UMa_LOS(d3D, d2D, fc, hBS, hUT) {
+    // Effective antenna heights
+    const h_E = 1.0; // effective environment height (1m for UMa default)
+    const h_BS_prime = hBS - h_E;
+    const h_UT_prime = hUT - h_E;
+
+    // Breakpoint distance d'_BP
+    const c = 3e8;
+    const d_BP_prime = 4 * h_BS_prime * h_UT_prime * (fc * 1e9) / c;
+
+    let PL;
+    if (d2D >= 10 && d2D <= d_BP_prime) {
+        // PL1
+        PL = 28.0 + 22 * Math.log10(d3D) + 20 * Math.log10(fc);
+    } else {
+        // PL2 (d2D > d_BP)
+        PL = 28.0 + 40 * Math.log10(d3D) + 20 * Math.log10(fc)
+             - 9 * Math.log10(d_BP_prime * d_BP_prime + (hBS - hUT) * (hBS - hUT));
+    }
+    return PL;
+}
+
+// 3GPP UMa NLOS path loss — Table 7.4.1-1
+function PL_UMa_NLOS(d3D, d2D, fc, hBS, hUT, W, h) {
+    // First compute LOS path loss (for max comparison)
+    const PL_LOS = PL_UMa_LOS(d3D, d2D, fc, hBS, hUT);
+
+    // NLOS formula from Table 7.4.1-1
+    const PL_NLOS_formula = 13.54 + 39.08 * Math.log10(d3D) + 20 * Math.log10(fc)
+                            - 0.6 * (hUT - 1.5);
+
+    // PL_UMa-NLOS = max(PL_UMa-LOS, PL_NLOS)
+    return Math.max(PL_LOS, PL_NLOS_formula);
+}
+
+// Optional O2I (Outdoor-to-Indoor) not applied here as users are outdoor
+
+// Combined path loss with shadow fading
+function calcPathLoss_3GPP_UMa(distM, freqGHz, nReflections, isLos, refLossDb) {
+    if (distM < 10) distM = 10; // model validity: d2D >= 10m
+
+    const hBS = parseFloat(document.getElementById('hBS').value);
+    const hUT = parseFloat(document.getElementById('hUT').value);
+    const W = parseFloat(document.getElementById('streetW').value);
+    const h = parseFloat(document.getElementById('hAvgBuilding').value);
+    const enableSF = document.getElementById('shadowFading').checked;
+
+    const d2D = distM;
+    const d3D = Math.sqrt(d2D * d2D + (hBS - hUT) * (hBS - hUT));
+
+    let PL;
+    if (isLos) {
+        PL = PL_UMa_LOS(d3D, d2D, freqGHz, hBS, hUT);
+        // Shadow fading: sigma_SF = 4 dB (LOS)
+        if (enableSF) PL += gaussianRandom() * 4.0;
+    } else {
+        PL = PL_UMa_NLOS(d3D, d2D, freqGHz, hBS, hUT, W, h);
+        // Shadow fading: sigma_SF = 6 dB (NLOS)
+        if (enableSF) PL += gaussianRandom() * 6.0;
+        // Additional reflection loss from ray tracing
+        PL += nReflections * refLossDb;
+    }
+
+    return PL;
 }
 
 function calcRSSI(distM, freqGHz, nReflections, isLos) {
     const txPower = parseFloat(document.getElementById('txPower').value);
     const txGain = parseFloat(document.getElementById('txGain').value);
     const refLoss = parseFloat(document.getElementById('refLoss').value);
-    return txPower + txGain - calcPathLoss(distM, freqGHz, nReflections, isLos, refLoss);
+    const PL = calcPathLoss_3GPP_UMa(distM, freqGHz, nReflections, isLos, refLoss);
+    return txPower + txGain - PL;
 }
 
 function rssiToColor(rssi) {
@@ -759,11 +873,19 @@ function updateStats() {
     const rssis = userResults.map(r => r.rssi);
     const avg = rssis.reduce((a, b) => a + b, 0) / rssis.length;
     const covered = rssis.filter(r => r > -100).length;
-    el.innerHTML = `Users: ${mobileUsers.length}<br>
+    const losCount = userResults.filter(r => r.trace && r.trace.los).length;
+    const freq = parseFloat(document.getElementById('freq').value);
+    const hBS = parseFloat(document.getElementById('hBS').value);
+    const hUT = parseFloat(document.getElementById('hUT').value);
+    const h_E = 1.0;
+    const d_BP = 4 * (hBS - h_E) * (hUT - h_E) * (freq * 1e9) / 3e8;
+    el.innerHTML = `<strong>3GPP UMa Model</strong><br>
+        Users: ${mobileUsers.length} | LOS: ${losCount} | NLOS: ${mobileUsers.length - losCount}<br>
         Avg RSSI: ${avg.toFixed(1)} dBm<br>
         Min: ${Math.min(...rssis).toFixed(1)} | Max: ${Math.max(...rssis).toFixed(1)} dBm<br>
         Coverage (>-100dBm): ${covered}/${mobileUsers.length} (${(100*covered/mobileUsers.length).toFixed(0)}%)<br>
-        LOS users: ${userResults.filter(r=>r.trace&&r.trace.los).length}`;
+        Breakpoint d'<sub>BP</sub>: ${d_BP.toFixed(0)} m<br>
+        σ<sub>SF</sub>: LOS=4dB, NLOS=6dB`;
 }
 
 function updateBSList() {
@@ -846,7 +968,7 @@ document.getElementById('btnRandomUsers').addEventListener('click', () => {
 });
 document.getElementById('btnRecalc').addEventListener('click', recalculate);
 
-['freq', 'txPower', 'txGain', 'maxRef', 'refLoss', 'gridRes'].forEach(id => {
+['freq', 'txPower', 'txGain', 'maxRef', 'refLoss', 'gridRes', 'hBS', 'hUT', 'hAvgBuilding', 'streetW', 'shadowFading'].forEach(id => {
     document.getElementById(id).addEventListener('change', recalculate);
 });
 document.getElementById('showRays').addEventListener('change', () => { createRayLines(); });
